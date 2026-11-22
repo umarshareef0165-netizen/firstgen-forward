@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 export default function StarPage() {
   const [situation, setSituation] = useState("");
@@ -8,18 +8,19 @@ export default function StarPage() {
   const [result, setResult] = useState("");
   const [copied, setCopied] = useState(false);
 
-  const answer = useMemo(() => {
-    const parts = [
-      situation.trim() ? `In ${situation.trim()}` : "",
-      task.trim() ? `My task was to ${task.trim()}` : "",
-      action.trim() ? `I ${action.trim()}` : "",
-      result.trim() ? `As a result, ${result.trim()}` : "",
-    ].filter(Boolean);
-    return parts.join(" ");
-  }, [situation, task, action, result]);
+  const cleanPart = (text: string) => {
+    const t = text.trim();
+    if (!t) return "";
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  };
+  const answer = [
+    situation.trim() ? `${cleanPart(situation)}. ` : "",
+    task.trim() ? `${cleanPart(task)}. ` : "",
+    action.trim() ? `${cleanPart(action)}. ` : "",
+    result.trim() ? `${cleanPart(result)}. ` : "",
+  ].filter(Boolean).join("").trim();
   const words = answer ? answer.split(/\s+/).length : 0;
   const done = [situation, task, action, result].filter((x) => x.trim().length > 3).length;
-
   async function copy() {
     try { await navigator.clipboard.writeText(answer); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* clipboard unavailable */ }
   }
