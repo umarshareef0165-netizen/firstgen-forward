@@ -12,7 +12,7 @@ export default function InterviewPage() {
   const [result, setResult] = useState<Rubric | null>(null);
   const [history, setHistory] = useState<Attempt[]>([]);
   const [seconds, setSeconds] = useState(0);
-  const [running, setRunning] = useState(false);
+  const [running, setRunning] = useState(true);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -26,13 +26,23 @@ export default function InterviewPage() {
   }, [running]);
 
   const questions = QUESTION_BANK[role];
-  const current = questions[qi % questions.length];
+  const qiClamped = Math.min(qi, questions.length - 1);
+  const current = questions[qiClamped];
   const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
   const ss = String(seconds % 60).padStart(2, "0");
 
   function newQuestion(nextRole = role, nextQi?: number) {
-    const idx = nextQi ?? Math.floor(Math.random() * QUESTION_BANK[nextRole].length);
-    setQi(idx); setAnswer(""); setResult(null); setSeconds(0); setRunning(true);
+    let next = nextQi;
+    if (next === undefined) {
+      do {
+        next = Math.floor(Math.random() * questions.length);
+      } while (next === qi && questions.length > 1);
+    }
+    setQi(next);
+    setResult(null);
+    setAnswer("");
+    setSeconds(0);
+    setRunning(true);
   }
   function submit() {
     if (answer.trim().split(/\s+/).length < 3) return;
@@ -50,12 +60,12 @@ export default function InterviewPage() {
     <>
       <p className="kicker">Mock Interview Studio</p>
       <h1>Practise out loud. Get honest feedback.</h1>
-      <p className="muted">Answer in your own words — typing is fine, but saying it out loud first is closer to the real thing. Aim for 60–120 words per answer. The timer starts when you pick a question.</p>
+      <p className="muted">Answer each question in 60–120 words. The timer starts automatically with each question — pause it any time. Scores are out of 100 — aim for 70+.</p>
 
       <div className="grid c2">
         <div>
           <label htmlFor="role">Target role</label>
-          <select id="role" value={role} onChange={(e) => { setRole(e.target.value); setResult(null); setAnswer(""); setSeconds(0); setRunning(false); }}>
+          <select id="role" value={role} onChange={(e) => { setRole(e.target.value); setQi(0); setRunning(true); }}>
             {roles.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
           <div style={{ display: "flex", gap: ".6rem", marginTop: "1rem", flexWrap: "wrap" }}>
@@ -65,7 +75,7 @@ export default function InterviewPage() {
           <p style={{ marginTop: "1rem" }}>Timer: <span className="timer" aria-live="off">{mm}:{ss}</span> <span className="muted">(aim: under 01:30 per answer)</span></p>
         </div>
         <div className="qbox" aria-live="polite">
-          <p className="kicker">Question {qi + 1} of {questions.length}</p>
+          <p className="kicker">Question {qiClamped + 1} of {questions.length}</p>
           <h2 style={{ fontSize: "1.35rem" }}>{current.q}</h2>
           <p className="muted" style={{ marginBottom: 0 }}>Interviewer tip: {current.tip}</p>
         </div>
@@ -75,7 +85,6 @@ export default function InterviewPage() {
       <textarea id="answer" value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Type your answer here — as you would say it in the interview…" aria-describedby="wordcount" />
       <p id="wordcount" className="muted">{answer.trim() ? answer.trim().split(/\s+/).length : 0} words</p>
       <button className="btn" type="button" onClick={submit} disabled={answer.trim().split(/\s+/).filter(Boolean).length < 3}>Score my answer</button>
-
       {result && (
         <section className="section" aria-live="polite">
           <h2>Your rubric score</h2>
