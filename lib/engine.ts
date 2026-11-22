@@ -34,10 +34,33 @@ export const QUESTION_BANK: Record<string, { q: string; keywords: string[]; tip:
     { q: "How do you plan a lesson for a student you have never met?", keywords: ["ask", "level", "goal", "plan", "check"], tip: "Assess first, then plan: level → goal → steps → check." },
   ],
 };
-
-export const ACTION_VERBS = ["built", "created", "designed", "developed", "led", "launched", "improved", "automated", "shipped", "delivered", "organised", "organized", "mentored", "taught", "analysed", "analyzed", "implemented", "optimised", "optimized", "reduced", "increased", "won", "presented", "collaborated", "deployed", "tested", "fixed", "researched"];
+export const ACTION_VERBS = ["built", "created", "designed", "developed", "led", "launched", "improved", "automated", "shipped", "delivered", "organised", "organized", "mentored", "taught", "analysed", "analyzed", "implemented", "optimised", "optimized", "reduced", "increased", "won", "presented", "collaborated", "deployed", "tested", "fixed", "researched", "decided", "talked", "asked", "chose", "started"];
 export const WEAK_PHRASES = ["responsible for", "helped with", "worked on", "involved in", "duties included", "assisted with"];
 export const FILLERS = ["um", "uh", "like", "you know", "basically", "actually", "literally", "sort of", "kind of"];
+
+const WORD_RE = /[a-z0-9]+(?:['-][a-z0-9]+)*/gi;
+function wordsOf(text: string): string[] {
+  return text.toLowerCase().match(WORD_RE) ?? [];
+}
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+// Word-boundary phrase match: "data" must not match "dataset", "led" must not match "knowledge".
+function hasPhrase(text: string, phrase: string): boolean {
+  const ws = phrase.toLowerCase().split(/\s+/);
+  if (ws.length === 1) return wordsOf(text).includes(ws[0]);
+  return new RegExp(`\\b${ws.map(escapeRegExp).join("\\s+")}\\b`, "i").test(text);
+}
+// A real sentence has at least 4 words — filters out keyword salad.
+function sentencesOf(text: string): string[] {
+  return text.split(/[.!?]+/).map((s) => s.trim()).filter((s) => s.split(/\s+/).filter(Boolean).length >= 4);
+}
+const OUTCOME_UNITS = ["%", "percent", "users", "students", "marks", "points", "hours", "days", "seconds", "visitors", "customers", "bugs", "items", "photos", "people", "clients", "sales", "revenue", "downloads", "teams", "projects"];
+// A genuine quantified outcome: a number tied to a unit ("200 users", "40%") — not a bare digit.
+function hasOutcomeNumber(text: string): boolean {
+  if (/\b\d+\s*(%|x)\b/i.test(text)) return true;
+  return OUTCOME_UNITS.some((u) => new RegExp(`\\b\\d[\\d,]*\\s*${escapeRegExp(u)}\\b`, "i").test(text));
+}
 
 export type Rubric = {
   score: number;
@@ -48,53 +71,64 @@ export type Rubric = {
   keywordTotal: number;
   actionVerbHits: string[];
   hasNumber: boolean;
+  breakdown: { length: number; star: number; keywords: number; verbs: number; number: number; filler: number };
   feedback: string[];
   strengths: string[];
 };
-
 export function scoreAnswer(answer: string, keywords: string[]): Rubric {
   const text = answer.trim();
   const lower = text.toLowerCase();
   const words = text.split(/\s+/).filter(Boolean);
   const wordCount = words.length;
+  const wordSet = wordsOf(text);
+  const sentences = sentencesOf(text);
   const fillerCount = FILLERS.reduce((n, f) => {
     const m = lower.match(new RegExp(`\\b${f.replace(" ", "\\s+")}\\b`, "g"));
     return n + (m ? m.length : 0);
   }, 0);
-  const hasSituation = /\b(when|while|at (my|the|our)|during|in my)\b/.test(lower);
-  const hasAction = /\b(i (built|created|designed|decided|led|fixed|talked|asked|organised|organized|implemented|chose|started|reached out))\b/.test(lower);
-  const hasResult = /\b(result|outcome|improved|reduced|increased|learned|worked|passed|won|shipped|delivered|users|score)\b/.test(lower);
+  const hasSituation = sentences.some((s) => /\b(when|while|during|at (my|the|our)|in my)\b/i.test(s));
+  const actionRe = new RegExp(`\\bi\\s+(${ACTION_VERBS.map(escapeRegExp).join("|")}|reached\\s+out)\\b`, "i");
+  const hasAction = sentences.some((s) => actionRe.test(s));
+  const resultRe = /\b(result|outcome|improved|reduced|increased|learned|passed|won|shipped|delivered|score)\b/i;
+  const hasGenuineResult = sentences.some((s) => resultRe.test(s)) && (hasOutcomeNumber(text) || /\bi learned (that|to|how)\b/i.test(text) || /\b(improved|reduced|increased|cut|saved|grew)\b[^.]{0,40}\b(by|from|to)\b/i.test(text));
+  const hasResult = hasGenuineResult;
   const star = hasSituation && hasAction && hasResult;
-  const keywordHits = keywords.filter((k) => lower.includes(k.toLowerCase()));
-  const actionVerbHits = ACTION_VERBS.filter((v) => lower.includes(v));
-  const hasNumber = /\d/.test(text);
-  let score = 0;
-  if (wordCount >= 60) score += 25; else if (wordCount >= 30) score += 15; else if (wordCount >= 10) score += 6;
-  if (star) score += 25; else if (hasAction && hasResult) score += 14; else if (hasAction) score += 7;
-  score += Math.round((keywordHits.length / Math.max(1, keywords.length)) * 20);
-  if (actionVerbHits.length >= 2) score += 12; else if (actionVerbHits.length === 1) score += 6;
-  if (hasNumber) score += 8;
-  if (fillerCount === 0 && wordCount > 0) score += 10; else if (fillerCount <= 2) score += 5;
-  score = Math.min(100, score);
+  const keywordHits = keywords.filter((k) => hasPhrase(text, k));
+  const actionVerbHits = ACTION_VERBS.filter((v) => wordSet.includes(v) || sentences.some((s) => new RegExp(`\\bi\\s+${escapeRegExp(v)}\\b`, "i").test(s)));
+  const verbInSentence = (v: string) => sentences.some((s) => new RegExp(`\\bi\\s+${escapeRegExp(v)}\\b`, "i").test(s));
+  const verbHits = ACTION_VERBS.filter((v) => verbInSentence(v));
+  const lengthScore = wordCount >= 60 ? 25 : wordCount >= 30 ? 15 : wordCount >= 10 ? 6 : 0;
+  const starScore = star ? 25 : (hasSituation ? 8 : 0) + (hasAction ? 10 : 0) + (hasResult ? 7 : 0);
+  const keywordScore = Math.min(20, Math.round((keywordHits.length / Math.max(1, keywords.length)) * 20));
+  const verbScore = Math.min(12, verbHits.length * 4);
+  const numberScore = hasOutcomeNumber(text) ? 8 : 0;
+  const fillerScore = fillerCount === 0 && wordCount > 0 ? 10 : fillerCount <= 2 ? 6 : 0;
+  const breakdown = { length: lengthScore, star: starScore, keywords: keywordScore, verbs: verbScore, number: numberScore, filler: fillerScore };
+  const score = Math.min(100, lengthScore + starScore + keywordScore + verbScore + numberScore + fillerScore);
   const feedback: string[] = [];
+  if (wordCount < 10) feedback.push("Too short — aim for at least 60 words (about 45–60 seconds spoken).");
+  else if (wordCount < 30) feedback.push("Still thin — aim for 60–120 words with one concrete example.");
+  else if (wordCount < 60) feedback.push("Add a bit more — a concrete example with a number lifts this a lot.");
+  else if (wordCount > 220) feedback.push("Long answer — trim to the strongest example and stop.");
+  if (!hasSituation) feedback.push("Set the scene in one line: when and where this happened.");
+  if (!hasAction) feedback.push("Say what YOU did — one sentence starting “I …”.");
+  if (!hasResult) feedback.push("Close with the result: what changed, or what you learned — with a number if you can.");
+  if (keywordHits.length < Math.ceil(keywords.length / 2)) feedback.push("Answer the question more directly — the interviewer is listening for the question's key ideas.");
+  if (verbHits.length === 0) feedback.push("Use action verbs (built, led, fixed, organised) to show your part.");
+  else if (verbHits.length === 1) feedback.push("Use a second action verb to show more of what you did.");
+  if (!hasOutcomeNumber(text)) feedback.push("Add one number tied to an outcome (users, marks, time saved) — a bare date or count is not enough.");
+  if (fillerCount > 2) feedback.push(`Cut the fillers — you used ${fillerCount}. Pause instead of saying “um” or “like”.`);
   const strengths: string[] = [];
-  if (wordCount < 30) feedback.push("Answer is too short — aim for 60–120 words (about 45–60 seconds spoken) with one concrete example.");
-  if (!hasSituation) feedback.push("Add a one-line situation: where and when this happened.");
-  if (!hasAction) feedback.push("Say what YOU did — start action sentences with “I …”.");
-  if (!hasResult) feedback.push("Close with the result: what changed, what you learned, or a number.");
-  if (keywordHits.length < Math.ceil(keywords.length / 2)) feedback.push("Cover more of the question's key ideas — the interviewer is listening for them.");
-  if (fillerCount > 2) feedback.push(`Cut filler words — you used ${fillerCount}. Pause instead of saying “um” or “like”.`);
-  if (!hasNumber) feedback.push("Add one number if you can (users, marks, time saved, items fixed) — it makes the answer believable.");
-  if (wordCount > 220) feedback.push("This is long for one answer — trim it to the strongest example and stop.");
+  if (wordCount >= 60 && wordCount <= 220) strengths.push("Good length — enough detail without rambling.");
   if (star) strengths.push("Clear STAR structure — situation, action and result are all present.");
+  else if (hasSituation && hasAction) strengths.push("Situation and action are clear — add the result to complete STAR.");
   if (keywordHits.length >= Math.ceil(keywords.length / 2)) strengths.push("Good coverage of the question's key ideas.");
-  if (actionVerbHits.length >= 2) strengths.push(`Strong action verbs (${actionVerbHits.slice(0, 3).join(", ")}).`);
-  if (hasNumber) strengths.push("Includes a concrete number — that builds credibility.");
+  if (verbHits.length >= 2) strengths.push(`Strong action verbs (${verbHits.slice(0, 3).join(", ")}).`);
+  if (hasOutcomeNumber(text)) strengths.push("Includes a quantified outcome — that builds credibility.");
   if (fillerCount === 0 && wordCount > 0) strengths.push("No filler words — clean, confident delivery.");
-  if (feedback.length === 0) strengths.push("Solid answer — keep this structure for the real interview.");
-  return { score, wordCount, fillerCount, structure: { star, hasSituation, hasAction, hasResult }, keywordHits, keywordTotal: keywords.length, actionVerbHits, hasNumber, feedback, strengths };
+  if (feedback.length === 0) strengths.push("Strong answer — keep this structure for the real interview.");
+  return { score, wordCount, fillerCount, structure: { star, hasSituation, hasAction, hasResult }, keywordHits, keywordTotal: keywords.length, actionVerbHits, hasNumber: hasOutcomeNumber(text), feedback, strengths, breakdown };
 }
-
 export type CvReport = {
   score: number;
   wordCount: number;
@@ -112,58 +146,94 @@ export type CvReport = {
 export function analyseCv(text: string): CvReport {
   const lower = text.toLowerCase();
   const words = text.split(/\s+/).filter(Boolean);
+  const hasEmail = /[^\s@]+@[^\s@]+\.[^\s@]+/.test(text);
+  const hasPhone = /(\+?\d[\d\s-]{7,}\d)/.test(text);
+  const hasLink = /https?:\/\/|github\.com|linkedin\.com|portfolio|website/.test(lower);
+  const scrubbed = text
+    .replace(/[^\s@]+@[^\s@]+\.[^\s@]+/g, " ")
+    .replace(/(\+?\d[\d\s-]{7,}\d)/g, " ")
+    .replace(/https?:\/\/\S+|github\.com\/\S+|linkedin\.com\/\S+/g, " ");
+  const unitHits = OUTCOME_UNITS.filter((u) => new RegExp(`\\b\\d[\\d,]*\\s*${escapeRegExp(u)}\\b`, "i").test(scrubbed));
+  const verbRe = new RegExp(`\\b(${ACTION_VERBS.map(escapeRegExp).join("|")})\\b`, "gi");
+  const verbs = [...new Set((scrubbed.match(verbRe) || []).map((v) => v.toLowerCase()))];
+  const hasHeading = (re: RegExp) => re.test(lower);
+  const SKILL_WORDS = ["react", "python", "javascript", "typescript", "excel", "sql", "communication", "leadership", "next", "node", "html", "css", "git", "figma", "canva", "c", "java"];
   const sectionDefs = [
-    { name: "Contact / header", test: /@|phone|\+?\d[\d\s-]{7,}/ },
-    { name: "Education", test: /education|bachelor|bsc|bscs|university|degree|gpa|cgpa/ },
-    { name: "Experience", test: /experience|intern|work|job|tutor|developer/ },
-    { name: "Projects", test: /project|built|github|portfolio/ },
-    { name: "Skills", test: /skills|react|python|javascript|typescript|node/ },
+    { name: "Contact details", found: hasEmail || hasPhone },
+    { name: "Education", found: hasHeading(/education|degree|university|college|school|bachelor|bsc|bscs|ba\b|msc|ma\b/) },
+    { name: "Experience", found: hasHeading(/experience|work|job|internship|role|position|volunteer|tutor/) },
+    { name: "Projects", found: hasHeading(/project|built|developed|created|portfolio/) },
+    { name: "Skills", found: SKILL_WORDS.some((w) => new RegExp(`\\b${escapeRegExp(w)}\\b`, "i").test(lower)) },
   ];
-  const sections = sectionDefs.map((s) => ({ name: s.name, found: s.test.test(lower) }));
-  const hasEmail = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/.test(lower);
-  const hasPhone = /\+?\d[\d\s-]{8,}/.test(text);
-  const hasLink = /github\.com|linkedin\.com|vercel\.app|https?:\/\//.test(lower);
-  const verbs = ACTION_VERBS.filter((v) => lower.includes(v));
-  const quantified = (text.match(/\d+\s?(%|\+|x|users|students|projects|hours|days|gb|ms)?/gi) || []).length;
+  const sections = sectionDefs.map(({ name, found }) => ({ name, found }));
   const weak = WEAK_PHRASES.filter((p) => lower.includes(p));
-  let score = 0;
-  score += sections.filter((s) => s.found).length * 10;
-  if (hasEmail) score += 8;
-  if (hasLink) score += 10;
-  if (verbs.length >= 5) score += 12; else if (verbs.length >= 3) score += 7; else if (verbs.length >= 1) score += 3;
-  if (quantified >= 3) score += 10; else if (quantified >= 1) score += 5;
-  if (words.length >= 200 && words.length <= 700) score += 10; else if (words.length >= 120) score += 5;
-  score -= weak.length * 4;
+  const quantified = unitHits.length + (verbs.length > 0 && /\d/.test(scrubbed) ? 0 : 0);
+  let score =
+    (hasEmail || hasPhone ? 15 : 0) +
+    (hasLink ? 10 : 0) +
+    Math.min(25, sections.filter((s) => s.found).length * 5) +
+    Math.min(20, verbs.length * 4) +
+    Math.min(15, quantified * 5) +
+    (words.length >= 150 ? 15 : words.length >= 80 ? 8 : words.length >= 40 ? 3 : 0);
+  if (words.length < 60) score = Math.min(score, 34);
+  if (words.length > 800) score = Math.min(score, 60);
   score = Math.max(0, Math.min(100, score));
   const issues: string[] = [];
+  if (!hasEmail && !hasPhone) issues.push("Add contact details — an email address and phone number at the top.");
+  if (!hasLink) issues.push("Add a link to a portfolio, GitHub or LinkedIn profile.");
+  const missing = sections.filter((s) => !s.found).map((s) => s.name);
+  if (missing.length) issues.push(`Missing sections: ${missing.join(", ")}.`);
+  if (verbs.length < 3) issues.push("Use more action verbs — start bullets with built, led, improved, organised.");
+  if (quantified < 2) issues.push("Quantify your impact — add numbers to at least two achievements.");
+  if (words.length < 150) issues.push("Your CV is short — aim for 150–300 words with enough detail.");
+  if (words.length > 400) issues.push("Your CV is long — trim to under 400 words and keep only the strongest bullets.");
+  if (!issues.length) issues.push("Strong CV — check the details, then tailor it to each role.");
   const wins: string[] = [];
-  sections.filter((s) => !s.found).forEach((s) => issues.push(`Missing or unclear section: ${s.name}.`));
-  if (!hasEmail) issues.push("No email address found — recruiters need a way to reach you.");
-  if (!hasLink) issues.push("No portfolio, GitHub or live-project link found — add one; it is your strongest proof.");
-  if (verbs.length < 3) issues.push("Too few action verbs — start bullets with Built, Led, Improved, Shipped, not “responsible for”.");
-  if (quantified < 2) issues.push("Add numbers to your bullets — e.g. users reached, marks improved, time saved.");
-  if (words.length < 150) issues.push("CV looks very short — add one project with what you built and the result.");
-  if (words.length > 800) issues.push("CV is long — cut it to one page; keep only the strongest bullets.");
-  weak.forEach((w) => issues.push(`Weak phrase “${w}” — replace it with a specific action and result.`));
-  if (hasEmail) wins.push("Contact email present.");
-  if (hasLink) wins.push("Portfolio or project link present — judges and recruiters can verify your work.");
-  if (verbs.length >= 5) wins.push(`Strong action verbs throughout (${verbs.slice(0, 4).join(", ")}).`);
-  if (quantified >= 3) wins.push("Achievements are quantified — that makes them believable.");
-  if (sections.every((s) => s.found)) wins.push("All core sections present.");
+  if (hasEmail || hasPhone) wins.push("Contact details are present.");
+  if (hasLink) wins.push("A portfolio or profile link is included.");
+  if (verbs.length >= 3) wins.push(`${verbs.length} action verbs found.`);
+  if (quantified >= 2) wins.push(`${quantified} quantified achievements found.`);
+  if (sections.filter((s) => s.found).length >= 4) wins.push("Most sections are covered.");
   return { score, wordCount: words.length, sections, hasEmail, hasPhone, hasLink, actionVerbCount: verbs.length, quantifiedCount: quantified, weakPhrases: weak, issues, wins };
 }
-
-export function buildPlan(role: string, weeks: number, hoursPerWeek: number): { day: number; title: string; task: string; minutes: number }[] {
-  const days = weeks * 7;
+export function buildPlan(role: string, weeks: number, hoursPerWeek: number) {
+  const today = new Date();
   const perDay = Math.max(20, Math.round((hoursPerWeek * 60) / 7));
-  const cycle: { title: string; task: string }[] = [
-    { title: "Mock interview", task: `Answer 3 ${role} interview questions out loud in the Interview Studio and review the rubric feedback.` },
-    { title: "CV polish", task: "Rewrite one CV bullet with an action verb and a number, then re-run the CV Scorecard." },
-    { title: "STAR story", task: "Write one STAR story from a real project or class experience in the STAR Builder." },
-    { title: "Skill drill", task: "Build or fix one small thing in your stack (a component, a script, a query) and note what you learned." },
-    { title: "Research the role", task: "Read one real job description for your target role and list the 5 skills it asks for most." },
-    { title: "Application day", task: "Apply to one real opportunity with a tailored CV, or message one person for advice." },
-    { title: "Rest + review", task: "Re-read your best STAR answer and your top-scored mock answer. Rest — recovery is part of preparation." },
+  const days = [
+    { day: 1, title: "Pick your target role", task: `Write down the ${role} role you are aiming for and three skills it needs most.` },
+    { day: 2, title: "CV health check", task: "Run your CV through the CV Scorecard and fix the top issue it reports." },
+    { day: 3, title: "Tell me about yourself", task: "Write a 60–90 second answer, then say it out loud twice." },
+    { day: 4, title: "Mock interview 1", task: "Answer 3 interview questions in the Interview Studio and read every line of feedback." },
+    { day: 5, title: "Build your STAR story", task: "Write one STAR story from a real project or class experience." },
+    { day: 6, title: "Fix one weak answer", task: "Take your lowest-scoring mock answer and rewrite it with an action verb and a number." },
+    { day: 7, title: "Research the role", task: "Read one real job description for your target role and note the 5 skills it asks for most." },
+    { day: 8, title: "STAR story 2", task: "Write a second STAR story — this time about a time something went wrong." },
+    { day: 9, title: "CV pass 2", task: "Re-score your CV after yesterday's fixes and aim for +5 points." },
+    { day: 10, title: "Mock interview 2", task: "Do a full mock interview. Compare your score with mock 1." },
+    { day: 11, title: "Apply for real", task: "Apply to one real role or internship with a tailored CV." },
+    { day: 12, title: "Tell a friend", task: "Explain your best STAR story to a friend in under 2 minutes and ask what was unclear." },
+    { day: 13, title: "Numbers day", task: "Add a number to every bullet on your CV — users, marks, time saved, items fixed." },
+    { day: 14, title: "Rest + review", task: "Re-read your best answers. Rest — recovery is part of preparation." },
+    { day: 15, title: "STAR story 3", task: "Write a STAR story about helping or leading a team." },
+    { day: 16, title: "Mock interview 3", task: "Do a full mock. This time, pause instead of saying “um” or “like”." },
+    { day: 17, title: "CV tailoring", task: "Tailor your CV to one real job advert — change at least 5 lines." },
+    { day: 18, title: "Teach it back", task: "Teach a friend one concept from your field in 5 minutes." },
+    { day: 19, title: "Apply again", task: "Apply to a second real role, or follow up on the first." },
+    { day: 20, title: "Fix the weakest area", task: "Look at your lowest rubric breakdown area and drill it for one session." },
+    { day: 21, title: "Rest + review", task: "Review all your STAR stories. Cut any sentence that does not add evidence." },
+    { day: 22, title: "Mock interview 4", task: "Full mock interview. Aim for 70+ and zero filler words." },
+    { day: 23, title: "Portfolio check", task: "Make sure your GitHub or portfolio link works and shows your best project first." },
+    { day: 24, title: "STAR story 4", task: "Write a STAR story about learning something new quickly." },
+    { day: 25, title: "CV final pass", task: "Read your CV out loud. Fix typos, weak phrases and vague bullets." },
+    { day: 26, title: "Interview questions for them", task: "Write 3 smart questions to ask the interviewer at the end." },
+    { day: 27, title: "Mock interview 5", task: "Final full mock. Time yourself — 2 minutes per answer, no notes." },
+    { day: 28, title: "Rest + review", task: "Light review only. Sleep well — cramming now hurts more than it helps." },
+    { day: 29, title: "Apply to 3 roles", task: "Apply to 3 real roles that match your level. Save the adverts." },
+    { day: 30, title: "Interview day prep", task: "Pack your bag, confirm the time and place, and re-read your STAR stories once." },
   ];
-  return Array.from({ length: days }, (_, i) => ({ day: i + 1, ...cycle[i % cycle.length], minutes: perDay }));
+  return days.map((d) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() + d.day - 1);
+    return { ...d, date: date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }), minutes: perDay };
+  });
 }
