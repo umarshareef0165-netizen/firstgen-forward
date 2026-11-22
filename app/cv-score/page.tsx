@@ -2,11 +2,11 @@
 import { useState } from "react";
 import { analyseCv, type CvReport } from "../../lib/engine";
 
-const SAMPLE = `Umar Shareef
-umarshareef0165@gmail.com | +92 3191548165 | github.com/umarshareef0165-netizen
-Education: BSCS, University of Agriculture Faisalabad, 2023–2027
+const SAMPLE = `Your Name
+you@example.com | +1 (555) 010-0000 | github.com/your-username
+Education: BSc Computer Science, Example University, 2023–2027
 Experience: Private Tutor (1 year) — taught programming to school students.
-Projects: HireReady Agent — built an interview preparation tool. FasalShift — built a crop advisory app for farmers.
+Projects: Study Planner App — built a revision planner for classmates. CV Helper — built a tool that scores CVs.
 Skills: React, Next.js, TypeScript, Python, Node.js, Supabase, Vercel`;
 
 export default function CvPage() {
@@ -55,7 +55,7 @@ export default function CvPage() {
           )}
           <div className="card" style={{ marginTop: "1rem" }}>
             <h3>How to write a bullet that scores</h3>
-            <p className="muted">Weak: “Helped with the website.” Strong: “Built the booking page in React, cutting load time from 4s to 1.2s for 200 monthly visitors.” Formula: <strong>action verb + what you built + result with a number</strong>.</p>
+            <p className="muted">Weak: "Helped with the website." Strong: "Built the booking page in React, cutting load time from 4s to 1.2s for 200 monthly visitors." Formula: <strong>action verb + what you built + result with a number</strong>.</p>
           </div>
         </section>
       )}
