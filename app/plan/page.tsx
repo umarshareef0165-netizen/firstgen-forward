@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { buildPlan } from "../../lib/engine";
 
 export default function PlanPage() {
@@ -7,20 +7,19 @@ export default function PlanPage() {
   const [weeks, setWeeks] = useState(4);
   const [hours, setHours] = useState(7);
   const [made, setMade] = useState(false);
-  const [checked, setChecked] = useState<Record<number, boolean>>({});
-
-  const plan = useMemo(() => (made ? buildPlan(role, weeks, hours) : []), [made, role, weeks, hours]);
-  const doneCount = plan.filter((d) => checked[d.day]).length;
+  const [plan, setPlan] = useState<ReturnType<typeof buildPlan>>([]);
+  const [checked, setChecked] = useState<Record<string, boolean>>({});
+  const doneCount = plan.filter((d) => checked[`${role}|${d.day}`]).length;
 
   useEffect(() => {
     try { setChecked(JSON.parse(localStorage.getItem("fgf-plan") || "{}")); } catch { /* empty */ }
   }, []);
   function toggle(day: number) {
-    const next = { ...checked, [day]: !checked[day] };
+    const key = `${role}|${day}`;
+    const next = { ...checked, [key]: !checked[key] };
     setChecked(next);
     try { localStorage.setItem("fgf-plan", JSON.stringify(next)); } catch { /* ignore */ }
   }
-
   return (
     <>
       <p className="kicker">30-Day Readiness Plan</p>
@@ -47,24 +46,24 @@ export default function PlanPage() {
             <input id="hours" type="number" min={2} max={30} value={hours} onChange={(e) => setHours(Math.max(2, Math.min(30, Number(e.target.value) || 2)))} />
           </div>
         </div>
-        <button className="btn" type="button" onClick={() => setMade(true)} style={{ marginTop: "1rem" }}>Build my plan</button>
+        <button className="btn" type="button" onClick={() => { setMade(true); setPlan(buildPlan(role, weeks, hours)); }} style={{ marginTop: "1rem" }}>Build my plan</button>
       </div>
 
       {made && plan.length > 0 && (
         <section className="section" aria-live="polite">
-          <h2>Your {weeks}-week plan · {role}</h2>
+          <h2>Your 30-day plan</h2>
           <div className="progress-label"><span>{doneCount} of {plan.length} days done</span><span>{Math.round((doneCount / plan.length) * 100)}%</span></div>
           <div className="progress" role="progressbar" aria-valuenow={Math.round((doneCount / plan.length) * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Plan progress"><div style={{ width: `${(doneCount / plan.length) * 100}%` }} /></div>
           <div style={{ marginTop: "1rem" }}>
             {plan.map((d) => (
-              <label className="check" key={d.day} style={{ textDecoration: checked[d.day] ? "line-through" : "none", opacity: checked[d.day] ? 0.65 : 1 }}>
-                <input type="checkbox" checked={!!checked[d.day]} onChange={() => toggle(d.day)} aria-label={`Day ${d.day}: ${d.title}`} />
-                <span><strong>Day {d.day} — {d.title}</strong> <span className="muted">({d.minutes} min)</span><br /><span className="muted">{d.task}</span></span>
+              <label className="check" key={d.day} style={{ textDecoration: checked[`${role}|${d.day}`] ? "line-through" : "none", opacity: checked[`${role}|${d.day}`] ? 0.65 : 1 }}>
+                <input type="checkbox" checked={!!checked[`${role}|${d.day}`]} onChange={() => toggle(d.day)} aria-label={`Day ${d.day}: ${d.title}`} />
+                <span><strong>Day {d.day} — {d.title} · {d.date}</strong> <span className="muted">({d.minutes} min)</span><br /><span className="muted">{d.task}</span></span>
               </label>
             ))}
           </div>
           <p style={{ marginTop: "1rem" }}>
-            <button className="btn ghost" style={{ color: "var(--ink)", border: "1px solid var(--line)", background: "#fff" }} type="button" onClick={() => { setChecked({}); try { localStorage.removeItem("fgf-plan"); } catch { /* ignore */ } }}>Reset checkmarks</button>
+            <button className="btn ghost" style={{ color: "var(--ink)", border: "1px solid var(--line)", background: "#fff" }} type="button" onClick={() => { setChecked({}); try { localStorage.removeItem("fgf-plan"); } catch { /* ignore */ } }}>Reset all checkmarks</button>
           </p>
         </section>
       )}
